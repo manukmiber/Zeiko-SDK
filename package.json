@@ -1,0 +1,18 @@
+{
+  "name": "zeiko-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript client for the Zeiko Cloud API",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "build": "tsc",
+    "test": "npm run build && node --test test/",
+    "check": "npm test"
+  },
+  "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" }
+}

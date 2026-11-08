@@ -6,12 +6,13 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": { "zeiko": "dist/cli.js" },
   "files": ["dist"],
   "engines": { "node": ">=20" },
   "scripts": {
     "generate": "node scripts/generate.mjs",
     "build": "tsc",
-    "test": "npm run build && node --test test/",
+    "test": "npm run build && node --test test/*.test.mjs && python3 -m unittest discover -s python/tests -t python",
     "check": "npm test"
   },
   "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" }

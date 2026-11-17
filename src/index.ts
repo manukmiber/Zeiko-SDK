@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { type CallOptions, Operations } from './operations.js';
 
 export type { CallOptions } from './operations.js';
+export * from './db.js';
+export { applyMigrations, migrationFiles, splitStatements, MIGRATIONS_TABLE } from './migrations.js';
+export type { Migration, MigrationResult } from './migrations.js';
 
 /** What the API refused, in its own words. */
 export class ZeikoError extends Error {

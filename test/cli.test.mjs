@@ -25,3 +25,16 @@ test('without a key it says what to do', async () => {
 test('an unknown command prints help and fails', async () => {
   await assert.rejects(cli(['nope']), (e) => /zeiko vps ls/.test(e.stdout) && e.code === 2);
 });
+
+test('db commands need a key too', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'zeiko-'));
+  await assert.rejects(cli(['db', 'list'], { XDG_CONFIG_HOME: home, ZEIKO_API_KEY: '' }), (e) => /zeiko login/.test(e.stderr) && e.code === 1);
+});
+
+test('db execute without SQL says how to call it', async () => {
+  await assert.rejects(cli(['db', 'execute', 'db_x'], { ZEIKO_API_KEY: 'zkc_x' }), (e) => /Usage: zeiko db execute/.test(e.stderr) && e.code === 1);
+});
+
+test('an unknown db command prints the db help and fails', async () => {
+  await assert.rejects(cli(['db', 'nope']), (e) => /zeiko db migrations apply/.test(e.stdout) && e.code === 2);
+});

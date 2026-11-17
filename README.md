@@ -66,6 +66,52 @@ zeiko vps reboot <id>
 
 `ZEIKO_API_KEY` is used before the saved key. Add `--json` to print what the API answered. An error goes to stderr and the command exits with status 1; a refusal from the API also shows its code and request id.
 
+## Zeiko DB
+
+Zeiko DB is a database you reach over HTTPS, in the language you pick: `postgres`, `mysql`, `sqlite`, `kv` (key-value) or `mongo`. Make one with the command line or in the developer console. The same `zkc_` key works for it.
+
+```sh
+zeiko db create <project-id> notes --lang postgres   # prints the id and its address
+zeiko db execute <db-id> "create table notes (id serial primary key, body text)"
+zeiko db execute <db-id> --file seed.sql             # each ;-separated statement, in one transaction
+zeiko db migrations apply <db-id> ./migrations       # each *.sql file once, in name order
+zeiko db list
+zeiko db delete <db-id>
+```
+
+`zeiko db execute` prints a table, or the answers with `--json`. Migrations work on `postgres`, `mysql` and `sqlite` databases, and record what they applied in a table called `_zeiko_migrations`. `ZEIKO_DB_URL` changes the address.
+
+From your code, with the SDK:
+
+```ts
+import { database, ZeikoDbError } from 'zeiko-sdk';
+
+const db = database(process.env.ZEIKO_DB_ID!, { key: process.env.ZEIKO_API_KEY! });
+
+const { rows } = await db.query('select id, body from notes where id > $1', [0]);  // each row is an array of values
+
+await db.transaction(async (tx) => {
+  await tx.query('insert into notes (body) values ($1)', ['hello']);
+});  // commits when the function returns, rolls back when it throws
+
+await db.kv.put('session/abc', { user: 'a' }, { ttl: 3600 });  // on a kv database
+const session = await db.kv.getJson<{ user: string }>('session/abc');  // null when there is none
+await db.redis('SET', 'counter', 1);
+```
+
+Or with `fetch`, from any language: `POST https://db.zeiko.biz.id/v1/<db-id>/query` with `authorization: Bearer <key>` and a JSON body `{ "sql": "...", "params": [] }`.
+
+With Drizzle, wrap the client in the proxy for your language and pass that to `drizzle` (`drizzle-orm/pg-proxy`, `mysql-proxy` or `sqlite-proxy`):
+
+```ts
+import { drizzle } from 'drizzle-orm/pg-proxy';
+import { pgProxy } from 'zeiko-sdk';
+
+const orm = drizzle(pgProxy(db));
+```
+
+A refusal is thrown as `ZeikoDbError`, with `status` and `code`. Nothing is retried for you: a request that failed in transit may still have run.
+
 ## What the clients do for you
 
 - Every write (`POST`, `PUT`, `PATCH`, `DELETE`) sends an `Idempotency-Key`, and a retry sends the same key as the first try. Pass `idempotencyKey` (TypeScript) or `idempotency_key` (Python) to choose it.

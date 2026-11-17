@@ -38,12 +38,13 @@ export function vpsLines(services: any[]): string[] {
 
 /** Prints a row per database. */
 function dbLines(dbs: any[]): string[] {
-  return dbs.map((d) => [d.id, d.lang ?? '-', d.status ?? '-', d.name ?? '-'].join('\t'));
+  return dbs.map((d) => [d.id, d.lang ?? '-', d.state ?? '-', d.name ?? '-'].join('\t'));
 }
 
-/** The databases in a list answer: a bare array, or `{ databases }`. */
+/** The databases in `GET /v1/databases`: each project's `databases`, in `{ projects: [{ project, databases }] }`. */
 function databasesOf(answer: any): any[] {
-  return Array.isArray(answer) ? answer : (answer?.databases ?? []);
+  const projects: any[] = Array.isArray(answer?.projects) ? answer.projects : [];
+  return projects.flatMap((p) => (Array.isArray(p?.databases) ? p.databases : []));
 }
 
 const cellText = (value: unknown): string => (value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value));

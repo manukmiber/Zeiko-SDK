@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { database, ZeikoDbError, pgProxy, mysqlProxy, sqliteProxy } from '../dist/index.js';
+import { database, ZeikoDbError, pgProxy, mysqlProxy, sqliteProxy, kyselyDriver, rowObjects } from '../dist/index.js';
 
 const BASE = 'https://db.example.test';
 const ID = 'db_test';
@@ -223,4 +223,42 @@ test('a mongo write error throws with mongo\'s code', async () => {
     assert.equal(e.mongoCode, 11000);
     return true;
   });
+});
+
+test('rows become objects keyed by column', () => {
+  assert.deepEqual(rowObjects({ columns: ['id', 'name'], rows: [[1, 'Ana'], [2, 'Budi']] }), [
+    { id: 1, name: 'Ana' },
+    { id: 2, name: 'Budi' },
+  ]);
+});
+
+test('the Kysely driver runs plain queries and a transaction on its own tx', async () => {
+  const { db: d, calls } = db([
+    json(200, { columns: ['id', 'name'], rows: [[1, 'Ana']], rowsAffected: 0 }),
+    json(200, { tx: 'tx_1', idleTimeoutMs: 30000 }),
+    json(200, { columns: [], rows: [], rowsAffected: 1, lastInsertId: 7 }),
+    json(200, {}),
+  ]);
+  const driver = kyselyDriver(d);
+  await driver.init();
+  const conn = await driver.acquireConnection();
+  const picked = await conn.executeQuery({ sql: 'select id, name from users where id = $1', parameters: [1] });
+  assert.deepEqual(picked.rows, [{ id: 1, name: 'Ana' }]);
+  assert.equal(picked.numAffectedRows, 0n);
+  await driver.beginTransaction(conn, {});
+  const inserted = await conn.executeQuery({ sql: 'insert into users (name) values (?)', parameters: ['Budi'] });
+  assert.equal(inserted.numAffectedRows, 1n);
+  assert.equal(inserted.insertId, 7n);
+  await driver.commitTransaction(conn);
+  await driver.releaseConnection(conn);
+  assert.deepEqual(calls.map((c) => c.url.slice(`${BASE}/v1/${ID}`.length)), ['/query', '/tx', '/tx/tx_1/query', '/tx/tx_1/commit']);
+  assert.deepEqual(JSON.parse(calls[2].body), { sql: 'insert into users (name) values (?)', params: ['Budi'] });
+});
+
+test('the Kysely driver refuses an isolation level instead of ignoring it', async () => {
+  const { db: d, calls } = db([]);
+  const driver = kyselyDriver(d);
+  const conn = await driver.acquireConnection();
+  await assert.rejects(driver.beginTransaction(conn, { isolationLevel: 'serializable' }), (e) => e instanceof ZeikoDbError && e.code === 'unsupported');
+  assert.equal(calls.length, 0);
 });

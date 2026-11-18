@@ -72,6 +72,13 @@ export interface Transaction {
   query(sql: string, params?: unknown[]): Promise<QueryResult>;
 }
 
+/** A transaction opened with `begin()`: end it with `commit` or `rollback` (it is rolled back after 30 s unused). */
+export interface OpenTransaction extends Transaction {
+  readonly id: string;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
 /** A key-value database (`kv`). Keys may have `/` in them: each part is kept as its own address segment. */
 export interface KvClient {
   /** The bytes under `key`, or null when there are none. */
@@ -117,6 +124,8 @@ export interface Database {
   batch(statements: Statement[], options?: { transaction?: boolean }): Promise<QueryResult[]>;
   /** Commits when `work` returns, rolls back and rethrows when it throws. */
   transaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T>;
+  /** Opens a transaction to run statements on one by one, for drivers that begin and end it themselves. */
+  begin(): Promise<OpenTransaction>;
   readonly kv: KvClient;
   /** One Redis command, for example `redis('SET', 'a', '1')`. Gives back the reply. */
   redis(...command: RedisArg[]): Promise<unknown>;
@@ -232,24 +241,34 @@ export function database(id: string, options: DatabaseOptions): Database {
       return (await json<{ results: QueryResult[] }>('POST', '/batch', body)).results;
     },
     async transaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
-      const opened = await json<TxOpened>('POST', '/tx');
-      const at = `/tx/${encodeURIComponent(opened.tx)}`;
-      const tx: Transaction = { query: (sql, params = []) => run(`${at}/query`, { sql, params }) };
+      const tx = await begin();
       try {
         const result = await work(tx);
-        await json('POST', `${at}/commit`);
+        await tx.commit();
         return result;
       } catch (err) {
-        await json('POST', `${at}/rollback`).catch(() => undefined);
+        await tx.rollback().catch(() => undefined);
         throw err;
       }
     },
+    begin,
     kv,
     redis: async (...command) => (await json<{ result: unknown }>('POST', '/redis', command)).result,
     redisPipeline: async (commands) => (await json<{ results: unknown[] }>('POST', '/redis', commands)).results,
     mongo,
     collection: (name) => collection(mongo, name),
   };
+
+  async function begin(): Promise<OpenTransaction> {
+    const opened = await json<TxOpened>('POST', '/tx');
+    const at = `/tx/${encodeURIComponent(opened.tx)}`;
+    return {
+      id: opened.tx,
+      query: (sql, params = []) => run(`${at}/query`, { sql, params }),
+      commit: async () => void (await json('POST', `${at}/commit`)),
+      rollback: async () => void (await json('POST', `${at}/rollback`)),
+    };
+  }
 
   function mongo<T = Record<string, unknown>>(command: Record<string, unknown>): Promise<T> {
     return json<T>('POST', '/mongo', command);
@@ -354,5 +373,109 @@ export function sqliteProxy(db: Pick<Database, 'query'>): SqliteProxy {
   return async (sql, params, method) => {
     const { rows } = await db.query(sql, params);
     return { rows: method === 'get' ? rows[0] : rows };
+  };
+}
+
+/** What Kysely hands a driver to run: the SQL its dialect compiled, and the parameters. */
+export interface KyselyCompiledQuery {
+  readonly sql: string;
+  readonly parameters: ReadonlyArray<unknown>;
+}
+
+/** Kysely's result shape: rows as objects, counts as bigint. */
+export interface KyselyQueryResult<R> {
+  readonly rows: R[];
+  readonly numAffectedRows?: bigint;
+  readonly insertId?: bigint;
+}
+
+/** One Kysely connection: plain requests, or the statements of the transaction it has open. */
+export interface KyselyConnection {
+  executeQuery<R>(query: KyselyCompiledQuery): Promise<KyselyQueryResult<R>>;
+  streamQuery<R>(query: KyselyCompiledQuery, chunkSize?: number): AsyncIterableIterator<KyselyQueryResult<R>>;
+}
+
+/** Kysely's `Driver`, for a dialect made of Kysely's own adapter, compiler and introspector. */
+export interface KyselyDriver {
+  init(): Promise<void>;
+  acquireConnection(): Promise<KyselyConnection>;
+  beginTransaction(connection: KyselyConnection, settings: { isolationLevel?: string }): Promise<void>;
+  commitTransaction(connection: KyselyConnection): Promise<void>;
+  rollbackTransaction(connection: KyselyConnection): Promise<void>;
+  releaseConnection(connection: KyselyConnection): Promise<void>;
+  destroy(): Promise<void>;
+}
+
+/** Rows as objects keyed by column name, the way Kysely (and most drivers) give them. */
+export function rowObjects(result: Pick<QueryResult, 'columns' | 'rows'>): Record<string, unknown>[] {
+  return result.rows.map((row) => {
+    const out: Record<string, unknown> = {};
+    result.columns.forEach((name, i) => {
+      out[name] = row[i];
+    });
+    return out;
+  });
+}
+
+/**
+ * A Kysely driver for a `postgres`, `mysql` or `sqlite` database. Pair it with Kysely's classes for the language:
+ *
+ *   import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from 'kysely';
+ *   const orm = new Kysely<DB>({ dialect: {
+ *     createAdapter: () => new PostgresAdapter(),
+ *     createDriver: () => kyselyDriver(db),
+ *     createIntrospector: (k) => new PostgresIntrospector(k),
+ *     createQueryCompiler: () => new PostgresQueryCompiler(),
+ *   } });
+ *
+ * (MysqlAdapter/MysqlIntrospector/MysqlQueryCompiler and the Sqlite ones the same way.) `orm.transaction()` runs on
+ * one transaction of the database. An isolation level is refused: the database's own is used, never another one.
+ */
+export function kyselyDriver(db: Pick<Database, 'query' | 'begin'>): KyselyDriver {
+  type Conn = KyselyConnection & { tx: OpenTransaction | null };
+  const answer = <R>(result: QueryResult): KyselyQueryResult<R> => ({
+    rows: rowObjects(result) as R[],
+    numAffectedRows: BigInt(result.rowsAffected ?? 0),
+    ...(result.lastInsertId === undefined || result.lastInsertId === null ? {} : { insertId: BigInt(result.lastInsertId) }),
+  });
+  const connection = (): Conn => {
+    const conn: Conn = {
+      tx: null,
+      async executeQuery<R>(query: KyselyCompiledQuery) {
+        const params = [...query.parameters];
+        const result = conn.tx ? await conn.tx.query(query.sql, params) : await db.query(query.sql, params);
+        return answer<R>(result);
+      },
+      async *streamQuery<R>(query: KyselyCompiledQuery) {
+        // The whole answer comes in one response, so it is one chunk.
+        yield await conn.executeQuery<R>(query);
+      },
+    };
+    return conn;
+  };
+  const open = (c: KyselyConnection): Conn => c as Conn;
+  return {
+    async init() {},
+    async acquireConnection() {
+      return connection();
+    },
+    async beginTransaction(c, settings) {
+      if (settings?.isolationLevel) {
+        throw new ZeikoDbError(`Isolation level "${settings.isolationLevel}" cannot be chosen on Zeiko DB; leave it out to use the database's own.`, 400, 'unsupported');
+      }
+      open(c).tx = await db.begin();
+    },
+    async commitTransaction(c) {
+      const tx = open(c).tx;
+      open(c).tx = null;
+      await tx?.commit();
+    },
+    async rollbackTransaction(c) {
+      const tx = open(c).tx;
+      open(c).tx = null;
+      await tx?.rollback();
+    },
+    async releaseConnection() {},
+    async destroy() {},
   };
 }

@@ -129,6 +129,24 @@ import { pgProxy } from 'zeiko-sdk';
 const orm = drizzle(pgProxy(db));
 ```
 
+With Kysely, give its dialect classes for your language and `kyselyDriver(db)`:
+
+```ts
+import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from 'kysely';
+import { kyselyDriver } from 'zeiko-sdk';
+
+const orm = new Kysely<DB>({
+  dialect: {
+    createAdapter: () => new PostgresAdapter(),
+    createDriver: () => kyselyDriver(db),
+    createIntrospector: (k) => new PostgresIntrospector(k),
+    createQueryCompiler: () => new PostgresQueryCompiler(),
+  },
+});
+```
+
+On a `mysql` database use `MysqlAdapter`, `MysqlIntrospector` and `MysqlQueryCompiler`; on `sqlite`, the `Sqlite` ones. `orm.transaction()` runs on one transaction of the database (`db.begin()`); choosing an isolation level is refused.
+
 A refusal is thrown as `ZeikoDbError`, with `status` and `code`. Nothing is retried for you: a request that failed in transit may still have run.
 
 ## What the clients do for you

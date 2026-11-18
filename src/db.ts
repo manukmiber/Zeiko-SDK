@@ -59,6 +59,8 @@ export class ZeikoDbError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    /** For a Mongo write error (`code` `mongo_write`): Mongo's own code, 11000 for a duplicate key. */
+    readonly mongoCode?: number,
   ) {
     super(message);
     this.name = 'ZeikoDbError';
@@ -82,6 +84,31 @@ export interface KvClient {
   list(options?: { prefix?: string; cursor?: string; limit?: number }): Promise<KvList>;
 }
 
+/** Mongo's answer to a write: how many documents, and the per-document errors when some failed. */
+export interface MongoWriteResult {
+  ok: number;
+  n?: number;
+  nModified?: number;
+  upserted?: { index: number; _id: unknown }[];
+  writeErrors?: { index: number; code: number; errmsg: string }[];
+  [field: string]: unknown;
+}
+
+/** A collection of a `mongo` database: the common calls, made from `db.mongo` commands. */
+export interface MongoCollection {
+  /** Every matching document (the whole cursor; page with `limit` and `skip`). */
+  find<T = Record<string, unknown>>(filter?: object, options?: { sort?: object; projection?: object; limit?: number; skip?: number }): Promise<T[]>;
+  findOne<T = Record<string, unknown>>(filter?: object, options?: { sort?: object; projection?: object }): Promise<T | null>;
+  insertOne(doc: object): Promise<{ insertedCount: number }>;
+  insertMany(docs: object[], options?: { ordered?: boolean }): Promise<{ insertedCount: number }>;
+  updateOne(filter: object, update: object | object[], options?: { upsert?: boolean }): Promise<{ matchedCount: number; modifiedCount: number; upsertedId: unknown }>;
+  updateMany(filter: object, update: object | object[], options?: { upsert?: boolean }): Promise<{ matchedCount: number; modifiedCount: number; upsertedId: unknown }>;
+  deleteOne(filter: object): Promise<{ deletedCount: number }>;
+  deleteMany(filter: object): Promise<{ deletedCount: number }>;
+  aggregate<T = Record<string, unknown>>(pipeline: object[]): Promise<T[]>;
+  countDocuments(filter?: object): Promise<number>;
+}
+
 /** A database, as `database()` gives it back. */
 export interface Database {
   readonly id: string;
@@ -95,6 +122,14 @@ export interface Database {
   redis(...command: RedisArg[]): Promise<unknown>;
   /** Several Redis commands in one request. A Redis error in one of them is `{ error: string }` in its place. */
   redisPipeline(commands: RedisArg[][]): Promise<unknown[]>;
+  /**
+   * One Mongo command on a `mongo` database, as `db.runCommand` takes it, in extended JSON, for example
+   * `mongo({ find: 'users', filter: { age: { $gte: 18 } } })`. Gives back Mongo's reply in relaxed extended JSON;
+   * a cursor is read to the end, so its id is always 0.
+   */
+  mongo<T = Record<string, unknown>>(command: Record<string, unknown>): Promise<T>;
+  /** A collection of a `mongo` database. A write that Mongo answered with `writeErrors` throws (code `mongo_write`). */
+  collection(name: string): MongoCollection;
 }
 
 type Payload = { json: unknown } | { bytes: Bytes };
@@ -212,6 +247,50 @@ export function database(id: string, options: DatabaseOptions): Database {
     kv,
     redis: async (...command) => (await json<{ result: unknown }>('POST', '/redis', command)).result,
     redisPipeline: async (commands) => (await json<{ results: unknown[] }>('POST', '/redis', commands)).results,
+    mongo,
+    collection: (name) => collection(mongo, name),
+  };
+
+  function mongo<T = Record<string, unknown>>(command: Record<string, unknown>): Promise<T> {
+    return json<T>('POST', '/mongo', command);
+  }
+}
+
+type MongoRun = <T = Record<string, unknown>>(command: Record<string, unknown>) => Promise<T>;
+
+function written(reply: MongoWriteResult): MongoWriteResult {
+  const first = reply.writeErrors?.[0];
+  if (first) throw new ZeikoDbError(first.errmsg, 200, 'mongo_write', first.code);
+  return reply;
+}
+
+function collection(mongo: MongoRun, name: string): MongoCollection {
+  const docs = async <T>(command: Record<string, unknown>): Promise<T[]> =>
+    (await mongo<{ cursor: { firstBatch: T[] } }>(command)).cursor.firstBatch;
+  const update = async (filter: object, change: object | object[], upsert: boolean | undefined, multi: boolean) => {
+    const reply = written(await mongo<MongoWriteResult>({ update: name, updates: [{ q: filter, u: change, upsert: upsert ?? false, multi }] }));
+    return { matchedCount: reply.n ?? 0, modifiedCount: reply.nModified ?? 0, upsertedId: reply.upserted?.[0]?._id ?? null };
+  };
+  const remove = async (filter: object, limit: number) =>
+    ({ deletedCount: written(await mongo<MongoWriteResult>({ delete: name, deletes: [{ q: filter, limit }] })).n ?? 0 });
+  const insert = async (documents: object[], ordered = true) =>
+    ({ insertedCount: written(await mongo<MongoWriteResult>({ insert: name, documents, ordered })).n ?? 0 });
+  return {
+    find: (filter = {}, options = {}) => docs({ find: name, filter, ...options }),
+    async findOne(filter = {}, options = {}) {
+      const [first] = await docs<any>({ find: name, filter, ...options, limit: 1, singleBatch: true });
+      return first ?? null;
+    },
+    insertOne: (doc) => insert([doc]),
+    insertMany: (list, options = {}) => insert(list, options.ordered ?? true),
+    updateOne: (filter, change, options = {}) => update(filter, change, options.upsert, false),
+    updateMany: (filter, change, options = {}) => update(filter, change, options.upsert, true),
+    deleteOne: (filter) => remove(filter, 1),
+    deleteMany: (filter) => remove(filter, 0),
+    aggregate: (pipeline) => docs({ aggregate: name, pipeline, cursor: {} }),
+    async countDocuments(filter = {}) {
+      return (await mongo<{ n: number }>({ count: name, query: filter })).n;
+    },
   };
 }
 

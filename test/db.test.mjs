@@ -179,3 +179,48 @@ test('the sqlite proxy gives one row for get, and all rows otherwise', async () 
   assert.deepEqual(await proxy('select id from t', [], 'get'), { rows: [1] });
   assert.equal((await proxy('select id from t where 0', [], 'get')).rows, undefined);
 });
+
+test('a mongo command posts the command document as it is', async () => {
+  const { db: d, calls } = db([json(200, { cursor: { id: 0, ns: 'db_test.users', firstBatch: [{ _id: 1 }] }, ok: 1 })]);
+  const reply = await d.mongo({ find: 'users', filter: { age: { $gte: 18 } }, sort: { b: 1, a: -1 } });
+  assert.deepEqual(reply.cursor.firstBatch, [{ _id: 1 }]);
+  assert.equal(calls[0].url, `${BASE}/v1/${ID}/mongo`);
+  assert.equal(calls[0].method, 'POST');
+  // The command name stays first and the sort keeps its order.
+  assert.equal(calls[0].body, '{"find":"users","filter":{"age":{"$gte":18}},"sort":{"b":1,"a":-1}}');
+});
+
+test('a collection makes the usual calls from commands', async () => {
+  const { db: d, calls } = db([
+    json(200, { n: 2, ok: 1 }),
+    json(200, { cursor: { id: 0, ns: 'db_test.users', firstBatch: [{ _id: 1, name: 'Ana' }] }, ok: 1 }),
+    json(200, { cursor: { id: 0, ns: 'db_test.users', firstBatch: [] }, ok: 1 }),
+    json(200, { n: 1, nModified: 1, ok: 1 }),
+    json(200, { n: 3, ok: 1 }),
+    json(200, { n: 1, ok: 1 }),
+    json(200, { cursor: { id: 0, ns: 'db_test.users', firstBatch: [{ _id: null, n: 2 }] }, ok: 1 }),
+  ]);
+  const users = d.collection('users');
+  assert.deepEqual(await users.insertMany([{ name: 'Ana' }, { name: 'Budi' }]), { insertedCount: 2 });
+  assert.deepEqual(await users.find({ name: 'Ana' }, { limit: 5 }), [{ _id: 1, name: 'Ana' }]);
+  assert.equal(await users.findOne({ name: 'Nobody' }), null);
+  assert.deepEqual(await users.updateOne({ _id: 1 }, { $set: { age: 30 } }), { matchedCount: 1, modifiedCount: 1, upsertedId: null });
+  assert.equal(await users.countDocuments({}), 3);
+  assert.deepEqual(await users.deleteOne({ _id: 1 }), { deletedCount: 1 });
+  assert.deepEqual(await users.aggregate([{ $group: { _id: null, n: { $sum: 1 } } }]), [{ _id: null, n: 2 }]);
+  const sent = calls.map((c) => JSON.parse(c.body));
+  assert.deepEqual(sent[0], { insert: 'users', documents: [{ name: 'Ana' }, { name: 'Budi' }], ordered: true });
+  assert.deepEqual(sent[2], { find: 'users', filter: { name: 'Nobody' }, limit: 1, singleBatch: true });
+  assert.deepEqual(sent[3], { update: 'users', updates: [{ q: { _id: 1 }, u: { $set: { age: 30 } }, upsert: false, multi: false }] });
+  assert.deepEqual(sent[5], { delete: 'users', deletes: [{ q: { _id: 1 }, limit: 1 }] });
+});
+
+test('a mongo write error throws with mongo\'s code', async () => {
+  const { db: d } = db([json(200, { n: 0, ok: 1, writeErrors: [{ index: 0, code: 11000, errmsg: 'E11000 duplicate key error' }] })]);
+  await assert.rejects(d.collection('users').insertOne({ name: 'Ana' }), (e) => {
+    assert.ok(e instanceof ZeikoDbError);
+    assert.equal(e.code, 'mongo_write');
+    assert.equal(e.mongoCode, 11000);
+    return true;
+  });
+});

@@ -109,7 +109,14 @@ await db.transaction(async (tx) => {
 await db.kv.put('session/abc', { user: 'a' }, { ttl: 3600 });  // on a kv database
 const session = await db.kv.getJson<{ user: string }>('session/abc');  // null when there is none
 await db.redis('SET', 'counter', 1);
+
+const users = db.collection('users');  // on a mongo database
+await users.insertOne({ name: 'Ana', age: 30 });
+const adults = await users.find({ age: { $gte: 18 } }, { sort: { age: -1 } });
+await db.mongo({ createIndexes: 'users', indexes: [{ key: { name: 1 }, name: 'name_1', unique: true }] });
 ```
+
+On a `mongo` database, `db.mongo(command)` sends one command as `db.runCommand` takes it, in extended JSON, and gives back the reply in relaxed extended JSON (dates as `{ "$date": "<ISO-8601>" }`). A cursor is read to the end, so there is no `getMore`. Sessions, transactions and commands that reach another database are refused with the reason. A write that Mongo answers with `writeErrors` throws from `collection()` with code `mongo_write` and Mongo's own code in `mongoCode` (11000 for a duplicate key).
 
 Or with `fetch`, from any language: `POST https://db.zeiko.biz.id/v1/<db-id>/query` with `authorization: Bearer <key>` and a JSON body `{ "sql": "...", "params": [] }`.
 

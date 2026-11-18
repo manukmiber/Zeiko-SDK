@@ -81,6 +81,18 @@ zeiko db delete <db-id>
 
 `zeiko db execute` prints a table, or the answers with `--json`. Migrations work on `postgres`, `mysql` and `sqlite` databases, and record what they applied in a table called `_zeiko_migrations`. `ZEIKO_DB_URL` changes the address.
 
+Snapshots and archives:
+
+```sh
+zeiko db snapshots <db-id>                       # the project's schedule and the snapshots kept
+zeiko db snapshot <db-id>                        # one now, on top of the schedule
+zeiko db restore <db-id> <snapshot-id> --name notes-copy   # always into a new database
+zeiko db export <db-id>                          # a download archive in the database's own format
+zeiko db download <db-id> <archive-id> --out notes.sql
+zeiko db extension <db-id> vector                # PostgreSQL extensions from the catalog
+zeiko db schedule <project-id> daily             # weekly is included; daily and hourly are paid from your balance
+```
+
 From your code, with the SDK:
 
 ```ts

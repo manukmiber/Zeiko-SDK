@@ -15,12 +15,20 @@ zeiko db create <project-id> <name> --lang postgres|mysql|sqlite|kv|mongo
 zeiko db delete <db-id>
 zeiko db execute <db-id> "<sql>"   or --file <x.sql>
 zeiko db migrations apply <db-id> <dir>
+zeiko db snapshots <db-id>          its snapshots, archives and restores
+zeiko db snapshot <db-id>           take a snapshot now
+zeiko db restore <db-id> <snapshot-id> [--name <new name>]   into a new database
+zeiko db export <db-id>             make a download archive
+zeiko db download <db-id> <archive-id> [--out <file>]
+zeiko db extension <db-id> <name>   vector, postgis, pg_trgm, uuid-ossp, citext, hstore, pgcrypto
+zeiko db schedule <project-id> weekly|daily|hourly
 zeiko api <METHOD> <path> [json body]
 Add --json to print what the API answered.`;
 
 type Say = (value: unknown, plain: () => string) => void;
 
 const DB_LANGS = ['postgres', 'mysql', 'sqlite', 'kv', 'mongo'];
+const SCHEDULES = ['weekly', 'daily', 'hourly'];
 
 async function key(): Promise<string> {
   if (process.env.ZEIKO_API_KEY) return process.env.ZEIKO_API_KEY;
@@ -39,6 +47,13 @@ export function vpsLines(services: any[]): string[] {
 /** Prints a row per database. */
 function dbLines(dbs: any[]): string[] {
   return dbs.map((d) => [d.id, d.lang ?? '-', d.state ?? '-', d.name ?? '-'].join('\t'));
+}
+
+/** Prints a row per snapshot, archive or restore. Exported for the tests. */
+export function snapshotLines(snaps: any[]): string[] {
+  return snaps.map((s) =>
+    [s.id, s.kind ?? '-', s.state ?? '-', typeof s.createdAt === 'number' ? new Date(s.createdAt).toISOString().slice(0, 16).replace('T', ' ') : '-', s.bytes ? `${s.bytes} B` : '-', s.error ?? ''].join('\t').trimEnd(),
+  );
 }
 
 /** The databases in `GET /v1/databases`: each project's `databases`, in `{ projects: [{ project, databases }] }`. */
@@ -119,6 +134,63 @@ async function dbCommand(args: string[], say: Say): Promise<void> {
     const migrations = await Promise.all(names.map(async (name) => ({ name, sql: await readFile(join(dir, name), 'utf8') })));
     const result = await applyMigrations(await db(id), migrations, found.lang);
     say(result, () => [...result.applied.map((name) => `applied ${name}`), `${result.skipped.length} already applied.`].join('\n'));
+    return;
+  }
+  if (sub === 'snapshots') {
+    const [id] = rest;
+    if (!id) throw new Error('Usage: zeiko db snapshots <db-id>');
+    const answer = await (await api()).getDatabasesDbsIdSnapshots(id);
+    const snaps: any[] = Array.isArray(answer?.snapshots) ? answer.snapshots : [];
+    say(answer, () => [`schedule: ${answer?.schedule ?? '-'}`, ...snapshotLines(snaps)].join('\n'));
+    return;
+  }
+  if (sub === 'snapshot' || sub === 'export') {
+    const [id] = rest;
+    if (!id) throw new Error(`Usage: zeiko db ${sub} <db-id>`);
+    const z = await api();
+    const answer = sub === 'snapshot' ? await z.postDatabasesDbsIdSnapshots(id, { body: {} }) : await z.postDatabasesDbsIdExport(id, { body: {} });
+    say(answer, () => `${answer?.id ?? '-'}\t${answer?.state ?? '-'}\t(see it with: zeiko db snapshots ${id})`);
+    return;
+  }
+  if (sub === 'restore') {
+    const name = takeFlag(rest, '--name');
+    const [id, snapshot] = rest;
+    if (!id || !snapshot) throw new Error('Usage: zeiko db restore <db-id> <snapshot-id> [--name <new name>]');
+    const answer = await (await api()).postDatabasesDbsIdRestore(id, { body: { snapshot, name: name ?? '' } });
+    const made = answer?.database ?? {};
+    say(answer, () => `${made.id ?? '-'}\t${made.state ?? '-'}\t${made.name ?? '-'}`);
+    return;
+  }
+  if (sub === 'download') {
+    const out = takeFlag(rest, '--out');
+    const [id, archive] = rest;
+    if (!id || !archive) throw new Error('Usage: zeiko db download <db-id> <archive-id> [--out <file>]');
+    const answer = await (await api()).getDatabasesDbsIdExportsSidDownload(id, archive);
+    const url = typeof answer?.url === 'string' ? answer.url : '';
+    if (!/^https:\/\//.test(url)) throw new Error('The API gave no download link.');
+    if (out === undefined) {
+      say(answer, () => url);
+      return;
+    }
+    const res = await fetch(url);
+    if (!res.ok || !res.body) throw new Error(`The download failed (${res.status}).`);
+    await writeFile(out, Buffer.from(await res.arrayBuffer()));
+    say({ ...answer, file: out }, () => `Saved ${out}.`);
+    return;
+  }
+  if (sub === 'extension') {
+    const [id, name] = rest;
+    if (!id || !name) throw new Error('Usage: zeiko db extension <db-id> <name>');
+    const answer = await (await api()).postDatabasesDbsIdExtensions(id, { body: { name } });
+    say(answer, () => `Switching on ${name} in ${id}.`);
+    return;
+  }
+  if (sub === 'schedule') {
+    const [project, schedule] = rest;
+    if (!project || !schedule || !SCHEDULES.includes(schedule)) throw new Error(`Usage: zeiko db schedule <project-id> ${SCHEDULES.join('|')}`);
+    const answer = await (await api()).postDatabasesProjectsIdSnapshots(project, { body: { schedule } });
+    const paid = Number(answer?.chargedMicro) > 0 && answer?.chargedText ? ` ${answer.chargedText} was taken from your balance.` : '';
+    say(answer, () => `Snapshot schedule: ${answer?.schedule ?? schedule}.${paid}`);
     return;
   }
   console.log(HELP);

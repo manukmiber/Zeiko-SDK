@@ -27,6 +27,11 @@ export abstract class Operations {
     return this.request('POST', `/v1/payments/${encodeURIComponent(pay)}/sent`, options);
   }
 
+  /** The next QR of a payment in parts */
+  postPaymentsPayNext(pay: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/payments/${encodeURIComponent(pay)}/next`, options);
+  }
+
   /** A receipt (PDF) */
   getPaymentsPayReceipt(pay: string, options?: CallOptions): Promise<any> {
     return this.request('GET', `/v1/payments/${encodeURIComponent(pay)}/receipt`, options);
@@ -82,7 +87,7 @@ export abstract class Operations {
     return this.request('POST', `/v1/vps/${encodeURIComponent(id)}/cancel`, options);
   }
 
-  /** End a server */
+  /** Refused: refunds go through us */
   postVpsIdEnd(id: string, options?: CallOptions): Promise<any> {
     return this.request('POST', `/v1/vps/${encodeURIComponent(id)}/end`, options);
   }
@@ -117,7 +122,7 @@ export abstract class Operations {
     return this.request('POST', `/v1/hosting/${encodeURIComponent(id)}/cancel`, options);
   }
 
-  /** End a hosting */
+  /** Refused: refunds go through us */
   postHostingIdEnd(id: string, options?: CallOptions): Promise<any> {
     return this.request('POST', `/v1/hosting/${encodeURIComponent(id)}/end`, options);
   }
@@ -210,5 +215,100 @@ export abstract class Operations {
   /** What happened on the account */
   getEvents(options?: CallOptions): Promise<any> {
     return this.request('GET', `/v1/events`, options);
+  }
+
+  /** Renew from the balance by itself */
+  postHostingIdAutoRenew(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/hosting/${encodeURIComponent(id)}/auto-renew`, options);
+  }
+
+  /** Renew from the balance by itself */
+  postVpsIdAutoRenew(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/vps/${encodeURIComponent(id)}/auto-renew`, options);
+  }
+
+  /** Pay a QRIS payment from the balance */
+  postPaymentsPaySaldo(pay: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/payments/${encodeURIComponent(pay)}/saldo`, options);
+  }
+
+  /** Your database projects and what can be ordered */
+  getDatabases(options?: CallOptions): Promise<any> {
+    return this.request('GET', `/v1/databases`, options);
+  }
+
+  /** Order a database project */
+  postDatabasesProjects(options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects`, options);
+  }
+
+  /** Delete a project */
+  deleteDatabasesProjectsId(id: string, options?: CallOptions): Promise<any> {
+    return this.request('DELETE', `/v1/databases/projects/${encodeURIComponent(id)}`, options);
+  }
+
+  /** Renew a project */
+  postDatabasesProjectsIdRenew(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects/${encodeURIComponent(id)}/renew`, options);
+  }
+
+  /** Move a project to a bigger plan */
+  postDatabasesProjectsIdUpgrade(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects/${encodeURIComponent(id)}/upgrade`, options);
+  }
+
+  /** Wake a paused free project */
+  postDatabasesProjectsIdResume(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects/${encodeURIComponent(id)}/resume`, options);
+  }
+
+  /** Make a database */
+  postDatabasesProjectsIdDbs(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects/${encodeURIComponent(id)}/dbs`, options);
+  }
+
+  /** A project's usage this month */
+  getDatabasesProjectsIdUsage(id: string, options?: CallOptions): Promise<any> {
+    return this.request('GET', `/v1/databases/projects/${encodeURIComponent(id)}/usage`, options);
+  }
+
+  /** Delete a database */
+  deleteDatabasesDbsId(id: string, options?: CallOptions): Promise<any> {
+    return this.request('DELETE', `/v1/databases/dbs/${encodeURIComponent(id)}`, options);
+  }
+
+  /** A database's snapshots and archives */
+  getDatabasesDbsIdSnapshots(id: string, options?: CallOptions): Promise<any> {
+    return this.request('GET', `/v1/databases/dbs/${encodeURIComponent(id)}/snapshots`, options);
+  }
+
+  /** Take a snapshot now */
+  postDatabasesDbsIdSnapshots(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/dbs/${encodeURIComponent(id)}/snapshots`, options);
+  }
+
+  /** Make a download archive */
+  postDatabasesDbsIdExport(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/dbs/${encodeURIComponent(id)}/export`, options);
+  }
+
+  /** A link to download an archive */
+  getDatabasesDbsIdExportsSidDownload(id: string, sid: string, options?: CallOptions): Promise<any> {
+    return this.request('GET', `/v1/databases/dbs/${encodeURIComponent(id)}/exports/${encodeURIComponent(sid)}/download`, options);
+  }
+
+  /** Restore a snapshot into a new database */
+  postDatabasesDbsIdRestore(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/dbs/${encodeURIComponent(id)}/restore`, options);
+  }
+
+  /** Switch on a PostgreSQL extension */
+  postDatabasesDbsIdExtensions(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/dbs/${encodeURIComponent(id)}/extensions`, options);
+  }
+
+  /** Change the snapshot schedule */
+  postDatabasesProjectsIdSnapshots(id: string, options?: CallOptions): Promise<any> {
+    return this.request('POST', `/v1/databases/projects/${encodeURIComponent(id)}/snapshots`, options);
   }
 }

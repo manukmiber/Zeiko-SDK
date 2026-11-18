@@ -23,6 +23,10 @@ class Operations:
         """Say a QRIS payment was paid"""
         return self.request("POST", f"/v1/payments/{_q(pay)}/sent", **options)
 
+    def post_payments_pay_next(self, pay: str, **options: Any) -> Any:
+        """The next QR of a payment in parts"""
+        return self.request("POST", f"/v1/payments/{_q(pay)}/next", **options)
+
     def get_payments_pay_receipt(self, pay: str, **options: Any) -> Any:
         """A receipt (PDF)"""
         return self.request("GET", f"/v1/payments/{_q(pay)}/receipt", **options)
@@ -68,7 +72,7 @@ class Operations:
         return self.request("POST", f"/v1/vps/{_q(id)}/cancel", **options)
 
     def post_vps_id_end(self, id: str, **options: Any) -> Any:
-        """End a server"""
+        """Refused: refunds go through us"""
         return self.request("POST", f"/v1/vps/{_q(id)}/end", **options)
 
     def get_hosting(self, **options: Any) -> Any:
@@ -96,7 +100,7 @@ class Operations:
         return self.request("POST", f"/v1/hosting/{_q(id)}/cancel", **options)
 
     def post_hosting_id_end(self, id: str, **options: Any) -> Any:
-        """End a hosting"""
+        """Refused: refunds go through us"""
         return self.request("POST", f"/v1/hosting/{_q(id)}/end", **options)
 
     def get_sites(self, **options: Any) -> Any:
@@ -170,3 +174,79 @@ class Operations:
     def get_events(self, **options: Any) -> Any:
         """What happened on the account"""
         return self.request("GET", f"/v1/events", **options)
+
+    def post_hosting_id_auto_renew(self, id: str, **options: Any) -> Any:
+        """Renew from the balance by itself"""
+        return self.request("POST", f"/v1/hosting/{_q(id)}/auto-renew", **options)
+
+    def post_vps_id_auto_renew(self, id: str, **options: Any) -> Any:
+        """Renew from the balance by itself"""
+        return self.request("POST", f"/v1/vps/{_q(id)}/auto-renew", **options)
+
+    def post_payments_pay_saldo(self, pay: str, **options: Any) -> Any:
+        """Pay a QRIS payment from the balance"""
+        return self.request("POST", f"/v1/payments/{_q(pay)}/saldo", **options)
+
+    def get_databases(self, **options: Any) -> Any:
+        """Your database projects and what can be ordered"""
+        return self.request("GET", f"/v1/databases", **options)
+
+    def post_databases_projects(self, **options: Any) -> Any:
+        """Order a database project"""
+        return self.request("POST", f"/v1/databases/projects", **options)
+
+    def delete_databases_projects_id(self, id: str, **options: Any) -> Any:
+        """Delete a project"""
+        return self.request("DELETE", f"/v1/databases/projects/{_q(id)}", **options)
+
+    def post_databases_projects_id_renew(self, id: str, **options: Any) -> Any:
+        """Renew a project"""
+        return self.request("POST", f"/v1/databases/projects/{_q(id)}/renew", **options)
+
+    def post_databases_projects_id_upgrade(self, id: str, **options: Any) -> Any:
+        """Move a project to a bigger plan"""
+        return self.request("POST", f"/v1/databases/projects/{_q(id)}/upgrade", **options)
+
+    def post_databases_projects_id_resume(self, id: str, **options: Any) -> Any:
+        """Wake a paused free project"""
+        return self.request("POST", f"/v1/databases/projects/{_q(id)}/resume", **options)
+
+    def post_databases_projects_id_dbs(self, id: str, **options: Any) -> Any:
+        """Make a database"""
+        return self.request("POST", f"/v1/databases/projects/{_q(id)}/dbs", **options)
+
+    def get_databases_projects_id_usage(self, id: str, **options: Any) -> Any:
+        """A project's usage this month"""
+        return self.request("GET", f"/v1/databases/projects/{_q(id)}/usage", **options)
+
+    def delete_databases_dbs_id(self, id: str, **options: Any) -> Any:
+        """Delete a database"""
+        return self.request("DELETE", f"/v1/databases/dbs/{_q(id)}", **options)
+
+    def get_databases_dbs_id_snapshots(self, id: str, **options: Any) -> Any:
+        """A database's snapshots and archives"""
+        return self.request("GET", f"/v1/databases/dbs/{_q(id)}/snapshots", **options)
+
+    def post_databases_dbs_id_snapshots(self, id: str, **options: Any) -> Any:
+        """Take a snapshot now"""
+        return self.request("POST", f"/v1/databases/dbs/{_q(id)}/snapshots", **options)
+
+    def post_databases_dbs_id_export(self, id: str, **options: Any) -> Any:
+        """Make a download archive"""
+        return self.request("POST", f"/v1/databases/dbs/{_q(id)}/export", **options)
+
+    def get_databases_dbs_id_exports_sid_download(self, id: str, sid: str, **options: Any) -> Any:
+        """A link to download an archive"""
+        return self.request("GET", f"/v1/databases/dbs/{_q(id)}/exports/{_q(sid)}/download", **options)
+
+    def post_databases_dbs_id_restore(self, id: str, **options: Any) -> Any:
+        """Restore a snapshot into a new database"""
+        return self.request("POST", f"/v1/databases/dbs/{_q(id)}/restore", **options)
+
+    def post_databases_dbs_id_extensions(self, id: str, **options: Any) -> Any:
+        """Switch on a PostgreSQL extension"""
+        return self.request("POST", f"/v1/databases/dbs/{_q(id)}/extensions", **options)
+
+    def post_databases_projects_id_snapshots(self, id: str, **options: Any) -> Any:
+        """Change the snapshot schedule"""
+        return self.request("POST", f"/v1/databases/projects/{_q(id)}/snapshots", **options)
